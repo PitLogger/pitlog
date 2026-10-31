@@ -118,7 +118,7 @@ Exactly once, as the first record of block 0.
 |---|---|---|
 | `u32` | t | normally 0 |
 | 6 bytes | device_id | MAC address of the logger |
-| `str` | firmware | e.g. `PitLogger 0.1.0` |
+| `str` | firmware | e.g. `PitLogger 2026.10.1` |
 | `u8` | start_source | who started the recording, see 5.1 |
 | `u32` | preroll_ms | length of pre-trigger data contained in the file (0 = none) |
 

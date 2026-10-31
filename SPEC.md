@@ -1,8 +1,9 @@
 # The `.pitlog` file format
 
-**Version 1.0 – draft.** Until 1.0 is final, details may still change.
+**Version 1.1 – draft.** Until 1.0 is final, details may still change.
 
-A `.pitlog` file records one session of a PitLogger: vehicle data read via OBD-II, GPS positions,
+A `.pitlog` file records one session of a PitLogger: vehicle data read via OBD-II and vehicle
+profiles (manufacturer requests, see [PitLogger/vehicle-profiles](https://github.com/PitLogger/vehicle-profiles)), GPS positions,
 trouble codes and events such as markers set by the driver. This document describes the format
 completely, so that anyone can write a reader without other sources.
 
@@ -50,7 +51,7 @@ no footer: a file can be read up to wherever writing stopped.
 |---|---|---|---|
 | 0 | 8 bytes | magic | `89 50 49 54 4C 4F 47 0A` (`\x89PITLOG\n`) |
 | 8 | `u8` | version_major | `1` |
-| 9 | `u8` | version_minor | `0` |
+| 9 | `u8` | version_minor | `1` (`0` in files of firmware before vehicle profiles) |
 | 10 | `u16` | flags | `0` (reserved, readers ignore unknown bits) |
 | 12 | `u32` | session_id | random number, identical in every block of this file |
 
@@ -102,6 +103,7 @@ The payload of a block is a sequence of records:
 | `0x10` | CHANNEL_DEF | definition of a measurement channel |
 | `0x11` | SAMPLE | one measured value of a channel |
 | `0x12` | RAW_OBD | raw OBD-II response bytes |
+| `0x13` | RAW_DIAG | raw answer to a diagnostic request (since 1.1) |
 | `0x20` | GPS_FIX | position, speed, course, quality |
 | `0x30` | DTC | trouble codes of one kind at one point in time |
 | `0x40` | EVENT | start, stop, marker, connection changes … |
@@ -167,6 +169,10 @@ earlier block). Channel numbers are assigned per file, starting at 1.
 | `u8` | decimals | sensible number of decimals for display |
 | `f32` | min | typical range for scaling charts |
 | `f32` | max | |
+| `str` | key | since 1.1: stable identifier – OBD-II: the PID in hex (`0C`), vehicle profile: the signal `id` (`I30_STEER_ANGLE`) |
+| `str` | metric | since 1.1: standard meaning such as `speed`, `engineSpeed`, `stateOfCharge`; empty if none |
+| `u8` | label_count | since 1.1: number of display texts that follow |
+| (`i32`, `str`) × label_count | labels | since 1.1: display text for a raw value, e.g. `0` → `No`, `1` → `Yes` for two-state values or enumerations; the SAMPLE then holds the raw value |
 
 Channel names and units are always **English**, independent of the language the logger's user
 interface is set to. Readers that want to show other languages translate by `source` and
@@ -193,6 +199,20 @@ logger has no conversion for that PID.
 | bytes | data | data bytes of the response **without** the response service and PID bytes (rest of the body) |
 
 Example: the adapter answers `41 0C 0C B2` → `mode = 0x01`, `pid = 0x0C`, `data = 0C B2`.
+
+### 4.7a `0x13` RAW_DIAG (since 1.1)
+
+Raw answer to a diagnostic request of a vehicle profile (e.g. ReadDataByIdentifier `22`). Written
+once per answer, together with the SAMPLEs of the signals decoded from it.
+
+| Type | Field | Meaning |
+|---|---|---|
+| `u32` | t | time of the answer |
+| `u32` | tx | CAN ID the request was sent to |
+| `u32` | rx | CAN ID of the answer, 0 = not known |
+| `u8` | request_len | number of request bytes |
+| bytes | request | the request, service first, e.g. `22 01 04` |
+| bytes | answer | the complete answer, service first, e.g. `62 01 04 …` (rest of the body) |
 
 ### 4.8 `0x20` GPS_FIX
 
@@ -268,6 +288,7 @@ digits. `01 33` → `P0133`, `C1 23` → `U0123`.
 | 2 | GPS | 1 = speed, 2 = altitude, 3 = course (values also in GPS_FIX; for charts and rules) |
 | 3 | add-on module | module id (to be specified with the module SDK) |
 | 4 | PitLogger itself | 1 = supply voltage, 2 = internal temperature |
+| 5 | vehicle profile | 0; the signal is identified by `key` (since 1.1) |
 
 ## 6. Reading
 
@@ -335,3 +356,4 @@ A SAMPLE and the matching RAW_OBD (engine speed 812.5 1/min at t = 1000 ms on ch
 | Version | Changes |
 |---|---|
 | 1.0 (draft) | first version; channel names in English, manufacturer and model derived from the VIN by readers |
+| 1.1 (draft) | vehicle profiles: channel source 5, CHANNEL_DEF fields `key`, `metric`, `labels`; record RAW_DIAG. Readers of 1.0 skip the new fields and records |

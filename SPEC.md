@@ -162,11 +162,15 @@ earlier block). Channel numbers are assigned per file, starting at 1.
 | `u8` | source | origin of the value, see 5.3 |
 | `u16` | source_id | depends on source, see 5.3 |
 | `u8` | value_type | 1 = `f32` (only value in 1.0) |
-| `str` | name | display name, e.g. `Engine speed` (language as configured on the logger) |
+| `str` | name | English display name, e.g. `Engine speed` – see note below |
 | `str` | unit | e.g. `1/min`, `km/h`, `°C` |
 | `u8` | decimals | sensible number of decimals for display |
 | `f32` | min | typical range for scaling charts |
 | `f32` | max | |
+
+Channel names and units are always **English**, independent of the language the logger's user
+interface is set to. Readers that want to show other languages translate by `source` and
+`source_id` (e.g. OBD-II `0x010C`), not by the name, and fall back to the stored name.
 
 ### 4.6 `0x11` SAMPLE
 
@@ -303,7 +307,7 @@ SAMPLE (13 bytes) plus RAW_OBD (about 11 bytes) take about 24 bytes per measurem
 
 ## 8. Example
 
-[`examples/example.pitlog`](examples/example.pitlog) (416 bytes) contains a session with two
+[`examples/example.pitlog`](examples/example.pitlog) (424 bytes) contains a session with two
 blocks: SESSION_INFO, VEHICLE, two CHANNEL_DEFs, stored trouble codes `P0133` and `P0301`,
 samples with raw data, a TIME_SYNC, a GPS fix and two events.
 
@@ -312,8 +316,8 @@ Beginning of the file:
 ```
 0000  89 50 49 54 4c 4f 47 0a 01 00 00 00 34 12 ed 5e   file header: magic, v1.0, flags 0,
                                                          session_id 0x5EED1234
-0010  50 4c 42 4b 34 12 ed 5e 00 00 00 00 0e 01 00 00   block 0: PLBK, session_id, seq 0,
-                                                         payload 270 bytes
+0010  50 4c 42 4b 34 12 ed 5e 00 00 00 00 10 01 00 00   block 0: PLBK, session_id, seq 0,
+                                                         payload 272 bytes
 0020  01 1f 00 00 00 00 00 cc ba 97 0a 1c 54 0f 50 69   SESSION_INFO (31 bytes): t 0,
 0030  74 4c 6f 67 67 65 72 20 30 2e 31 2e 30 01 30 75   device cc:ba:97:0a:1c:54, "PitLogger 0.1.0",
                                                          source 1 (web), pre-roll 30000 ms …
@@ -330,4 +334,4 @@ A SAMPLE and the matching RAW_OBD (engine speed 812.5 1/min at t = 1000 ms on ch
 
 | Version | Changes |
 |---|---|
-| 1.0 (draft) | first version |
+| 1.0 (draft) | first version; channel names in English, manufacturer and model derived from the VIN by readers |

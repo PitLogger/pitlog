@@ -169,7 +169,7 @@ earlier block). Channel numbers are assigned per file, starting at 1.
 | `u8` | decimals | sensible number of decimals for display |
 | `f32` | min | typical range for scaling charts |
 | `f32` | max | |
-| `str` | key | since 1.1: stable identifier – OBD-II: the PID in hex (`0C`), vehicle profile: the signal `id` (`I30_STEER_ANGLE`) |
+| `str` | key | since 1.1: stable identifier – OBD-II: the PID in hex (`0C`), vehicle profile: the signal `id` (`I30_STEER_ANGLE`), add-on module: `M`, the last four hex digits of the module's MAC address, `.` and the value's number (`MBD3C.0`) |
 | `str` | metric | since 1.1: standard meaning such as `speed`, `engineSpeed`, `stateOfCharge`; empty if none |
 | `u8` | label_count | since 1.1: number of display texts that follow |
 | (`i32`, `str`) × label_count | labels | since 1.1: display text for a raw value, e.g. `0` → `No`, `1` → `Yes` for two-state values or enumerations; the SAMPLE then holds the raw value |
@@ -286,7 +286,7 @@ digits. `01 33` → `P0133`, `C1 23` → `U0123`.
 |---|---|---|
 | 1 | OBD-II | `mode << 8 \| pid`, e.g. `0x010C` for engine speed |
 | 2 | GPS | 1 = speed, 2 = altitude, 3 = course (values also in GPS_FIX; for charts and rules) |
-| 3 | add-on module | module id (to be specified with the module SDK) |
+| 3 | add-on module | the value's number within its module; the module and value are identified by `key` (since 1.1) |
 | 4 | PitLogger itself | 1 = supply voltage, 2 = internal temperature |
 | 5 | vehicle profile | 0; the signal is identified by `key` (since 1.1) |
 
@@ -356,4 +356,4 @@ A SAMPLE and the matching RAW_OBD (engine speed 812.5 1/min at t = 1000 ms on ch
 | Version | Changes |
 |---|---|
 | 1.0 (draft) | first version; channel names in English, manufacturer and model derived from the VIN by readers |
-| 1.1 (draft) | vehicle profiles: channel source 5, CHANNEL_DEF fields `key`, `metric`, `labels`; record RAW_DIAG. Readers of 1.0 skip the new fields and records |
+| 1.1 (draft) | vehicle profiles: channel source 5, CHANNEL_DEF fields `key`, `metric`, `labels`; record RAW_DIAG; values of add-on modules (channel source 3, `key`). Readers of 1.0 skip the new fields and records |

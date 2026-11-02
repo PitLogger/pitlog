@@ -1,0 +1,838 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PitLog Viewer</title>
+<meta name="description" content="Open PitLogger recordings (.pitlog) in the browser. Nothing is uploaded.">
+<style>
+/* PitLogger colours; figures in a DIN face like on instrument clusters */
+:root{--bg:#0f141b;--card:#161d27;--tile:#121821;--raise:#1d2735;--line:#243042;--line2:#34445a;--text:#e9eef4;--muted:#8a97a8;
+  --acc:#3fa7ff;--ok:#3ecf8e;--warn:#f5b947;--err:#ff4d4d;--grid:#1f2937;--track:#2a3546;--slow:#1c3d63;--fast:#a8dcff;
+  --s1:#3fa7ff;--s2:#f5b947;--s3:#4ade80;--s4:#f472b6;
+  --num:Bahnschrift,"DIN Alternate","DIN 2014","Roboto Condensed","Arial Narrow",system-ui,sans-serif;color-scheme:dark}
+@media (prefers-color-scheme:light){
+  :root{--bg:#f3f5f8;--card:#fff;--tile:#f7f9fb;--raise:#eef2f6;--line:#dde3ea;--line2:#c5ced9;--text:#17202b;--muted:#5d6b7c;
+    --acc:#1677d2;--ok:#16935d;--warn:#b77700;--err:#d12f2f;--grid:#e8ecf1;--track:#d3dae3;--slow:#b9d7f5;--fast:#0b3f78;
+    --s1:#1677d2;--s2:#c27c00;--s3:#1a9850;--s4:#c2367f;color-scheme:light}
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.wrap{max-width:1600px;margin:0 auto;padding:0 20px}
+@media(max-width:600px){.wrap{padding:0 16px}}
+header{border-bottom:1px solid var(--line)}
+header .wrap{display:flex;align-items:center;gap:12px;min-height:58px;flex-wrap:wrap}
+header h1{font-size:18px;margin:0;font-weight:700;letter-spacing:-.01em;display:flex;align-items:center;gap:10px}
+header h1 .logo{width:30px;height:30px;flex:none;border-radius:7px;box-shadow:0 0 0 1px var(--line)}
+header .file{color:var(--muted);font-size:14px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.b{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:8px 14px;font:inherit;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap}
+.b.sec{background:var(--raise);color:var(--text);box-shadow:inset 0 0 0 1px var(--line2)}
+.b:disabled{opacity:.5;cursor:default}
+.muted{color:var(--muted)}
+.n{font-family:var(--num);font-variant-numeric:tabular-nums}
+
+/* ---- empty state: the whole page is the drop target ---- */
+#drop{min-height:calc(100vh - 59px);display:grid;place-items:center;padding:24px 16px}
+#drop .box{max-width:560px;width:100%;text-align:center;border:2px dashed var(--line2);border-radius:16px;padding:48px 24px;background:var(--card)}
+#drop.over .box{border-color:var(--acc);background:var(--raise)}
+#drop h2{font-family:var(--num);font-weight:600;font-size:32px;letter-spacing:.01em;margin:0 0 8px}
+#drop p{margin:0 auto 20px;max-width:46ch;color:var(--muted)}
+#drop .private{margin-top:22px;font-size:13px}
+#err{color:var(--err);margin-top:16px}
+
+/* ---- session ---- */
+#view{padding-top:20px;padding-bottom:40px}
+.facts{display:flex;flex-wrap:wrap;gap:8px 28px;align-items:flex-end;margin-bottom:6px}
+.fact b{display:block;font-family:var(--num);font-weight:600;font-size:30px;line-height:1.1;font-variant-numeric:tabular-nums}
+.fact span{font-size:13px;color:var(--muted)}
+.sub{color:var(--muted);font-size:14px;margin:0 0 18px}
+.warnbox{border-left:3px solid var(--warn);background:var(--card);padding:10px 14px;border-radius:0 8px 8px 0;margin:0 0 16px;font-size:14px}
+.grid{display:grid;grid-template-columns:260px minmax(0,1fr);gap:16px;align-items:start}
+@media(max-width:900px){.grid{grid-template-columns:minmax(0,1fr)}.mainc{order:-1}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+.card h3{font-size:14px;margin:0 0 10px;font-weight:650}
+aside .card{margin-bottom:16px}
+.chlist{max-height:52vh;overflow:auto;margin:0 -6px}
+#chFind{width:100%;margin:0 0 10px;padding:7px 10px;border-radius:8px;border:1px solid var(--line2);background:var(--tile);color:var(--text);font:inherit;font-size:14px}
+@media(max-width:900px){.chlist{max-height:220px}}
+.grp{font-size:12px;color:var(--muted);margin:10px 6px 4px}
+.grp:first-child{margin-top:0}
+.ch{display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:6px;cursor:pointer;font-size:14px}
+.ch:hover{background:var(--raise)}
+.ch input{margin:0;accent-color:var(--acc)}
+.ch .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ch .u{color:var(--muted);font-size:12px}
+.ch.off{opacity:.45}
+.list{font-size:14px}
+.list .it{display:flex;gap:10px;padding:6px 0;border-top:1px solid var(--line)}
+.list .it:first-child{border-top:0}
+.list .t{font-family:var(--num);font-variant-numeric:tabular-nums;color:var(--muted);min-width:52px}
+.list button.it{background:none;border:0;border-top:1px solid var(--line);color:inherit;font:inherit;width:100%;text-align:left;cursor:pointer}
+.list button.it:first-child{border-top:0}
+.list button.it:hover .t{color:var(--acc)}
+.dtc{font-family:var(--num);font-weight:600}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:14px}
+.kv span:nth-child(odd){color:var(--muted)}
+.kv span{overflow-wrap:anywhere}
+
+/* map and charts */
+.mainc>.card{margin-bottom:16px}
+#mapCard{padding:0;overflow:hidden;position:relative}
+#map{display:block;width:100%;height:340px;cursor:crosshair;touch-action:none}
+@media(max-width:600px){#map{height:260px}}
+.mapbtn{position:absolute;right:10px;top:10px;font-size:13px;padding:6px 10px}
+.attr{position:absolute;right:10px;bottom:10px;font-size:11px;color:var(--muted);background:color-mix(in srgb,var(--card) 85%,transparent);padding:2px 6px;border-radius:4px}
+.attr a{color:inherit}
+dialog{max-width:min(560px,calc(100vw - 32px));border:1px solid var(--line2);border-radius:12px;background:var(--card);color:var(--text);padding:20px}
+dialog::backdrop{background:rgba(0,0,0,.55)}
+dialog h2{font-size:18px;margin:0 0 10px}
+dialog p,dialog li{font-size:14px;line-height:1.5}
+dialog ul{padding-left:20px}
+dialog a{color:var(--acc)}
+dialog .row{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:16px}
+footer{border-top:1px solid var(--line);color:var(--muted);font-size:13px}
+footer .wrap{display:flex;gap:16px;flex-wrap:wrap;padding-top:14px;padding-bottom:18px}
+footer button{background:none;border:0;padding:0;color:inherit;font:inherit;text-decoration:underline;cursor:pointer}
+.legend{position:absolute;left:12px;bottom:10px;font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;background:color-mix(in srgb,var(--card) 80%,transparent);padding:4px 8px;border-radius:6px}
+.legend i{display:inline-block;width:80px;height:6px;border-radius:3px}
+.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.toolbar .sp{flex:1}
+.range{font-size:13px;color:var(--muted)}
+#lanes{position:relative;user-select:none;touch-action:pan-y}
+.lane{position:relative;border-top:1px solid var(--line)}
+.lane:first-child{border-top:0}
+.lane .hd{display:flex;align-items:baseline;gap:8px;padding:6px 0 0;font-size:13px}
+.lane .hd .sw{width:10px;height:3px;border-radius:2px;align-self:center}
+.lane .hd .nm{font-weight:600}
+.lane .hd .rd{margin-left:auto;font-family:var(--num);font-size:17px;font-weight:600;font-variant-numeric:tabular-nums}
+.lane .hd .mm{color:var(--muted);font-size:12px;font-family:var(--num);font-variant-numeric:tabular-nums}
+.lane canvas{display:block;width:100%;height:84px;cursor:crosshair}
+#axis{display:block;width:100%;height:24px}
+.empty{color:var(--muted);font-size:14px;padding:18px 0}
+.maptip{position:absolute;left:12px;right:12px;top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:14px;
+  background:var(--raise);border:1px solid var(--acc);border-radius:8px;padding:8px 10px}
+#map.placing{cursor:copy}
+.laps{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}
+.lap{display:grid;grid-template-columns:auto 1fr;align-items:baseline;gap:0 10px;text-align:left;background:var(--tile);color:inherit;font:inherit;
+  border:0;box-shadow:inset 0 0 0 1px var(--line);border-radius:8px;padding:7px 10px;cursor:pointer}
+.lap:hover{box-shadow:inset 0 0 0 1px var(--line2)}
+.lap.on{box-shadow:inset 0 0 0 2px var(--acc)}
+.lap .no{color:var(--muted);font-size:12px;grid-row:span 2}
+.lap .tm{font-family:var(--num);font-variant-numeric:tabular-nums;font-size:20px;font-weight:600}
+.lap .gap{font-family:var(--num);font-variant-numeric:tabular-nums;font-size:12px;color:var(--muted)}
+.lap.best .tm,.lap.best .gap{color:var(--ok)}
+.seg{display:flex;border-radius:8px;box-shadow:inset 0 0 0 1px var(--line2);overflow:hidden}
+.seg button{background:none;border:0;color:var(--muted);font:inherit;font-size:13px;padding:6px 12px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--raise);color:var(--text);box-shadow:inset 0 -2px 0 var(--acc)}
+.hint{font-size:12px;color:var(--muted);margin-top:8px}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <h1><svg class="logo" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><defs><linearGradient id="hb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#18212d"/><stop offset="1" stop-color="#0b1016"/></linearGradient><linearGradient id="hg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#2b8fea"/><stop offset="1" stop-color="#6cc6ff"/></linearGradient></defs><rect rx="112" fill="url(#hb)"/><g transform="translate(-27 0)"><g stroke="#2d3a4a" stroke-width="6" stroke-linecap="round"><line x1="226.2" y1="186.1" x2="213.5" y2="180.2"/><line x1="253.0" y1="156.8" x2="246.0" y2="144.7"/><line x1="291.8" y1="148.3" x2="293.0" y2="134.3"/><line x1="328.4" y1="163.4" x2="337.4" y2="152.7"/><line x1="349.8" y1="196.9" x2="363.3" y2="193.3"/><line x1="348.0" y1="236.6" x2="361.2" y2="241.4"/><line x1="323.9" y1="268.1" x2="331.9" y2="279.5"/></g><path d="M 178.0 214.0 A 108 108 0 1 1 282.2 321.9" fill="none" stroke="url(#hg)" stroke-width="42"/><path d="M 271.0 320.9 A 108 108 0 0 1 216.6 296.7" fill="none" stroke="#ff4d4d" stroke-width="42"/><rect x="152" y="85" width="52" height="342" rx="26" fill="#e9eef4"/><path d="M 277.3 219.0 L 290.0 220.9 L 355.3 174.0 L 282.0 207.1 Z" fill="#e9eef4"/><circle cx="286" cy="214" r="16" fill="#e9eef4"/><circle cx="286" cy="214" r="6" fill="#3fa7ff"/></g></svg>PitLog Viewer</h1>
+  <span class="file" id="fileName"></span>
+  <button class="b sec" id="btnOpen2" hidden>Open another file</button>
+</div></header>
+
+<main>
+  <section id="drop">
+    <div class="box">
+      <h2>Open a recording</h2>
+      <p>Drop a <b>.pitlog</b> file from your PitLogger here, or choose one. You see its values over time, the GPS track, markers and trouble codes, and can export them.</p>
+      <button class="b" id="btnOpen">Choose a file</button>
+      <input type="file" id="file" accept=".pitlog" hidden>
+      <div id="err" role="alert"></div>
+      <p class="private">The file is read in this browser only – nothing is uploaded. This page also works offline.</p>
+    </div>
+  </section>
+
+  <section id="view" class="wrap" hidden>
+    <div class="facts" id="facts"></div>
+    <p class="sub" id="sub"></p>
+    <div id="warn"></div>
+    <div class="grid">
+      <aside>
+        <div class="card"><h3>Values</h3><input type="search" id="chFind" placeholder="Find a value" aria-label="Find a value" hidden><div class="chlist" id="chlist"></div></div>
+        <div class="card" id="evCard"><h3>Markers and events</h3><div class="list" id="events"></div></div>
+        <div class="card" id="dtcCard"><h3>Trouble codes</h3><div class="list" id="dtcs"></div></div>
+        <div class="card"><h3>Recording</h3><div class="kv" id="info"></div></div>
+        <div class="card"><h3>Export</h3>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="b sec" id="expCsv" title="One row per tenth of a second, one column per value (the last value measured)">CSV table</button>
+            <button class="b sec" id="expLong" title="Every measurement as it was recorded: time, value, unit">CSV, every sample</button>
+            <button class="b sec" id="expGpx">GPX track</button>
+          </div>
+          <div class="hint">Exports cover the time range shown in the charts.</div>
+        </div>
+      </aside>
+      <div class="mainc">
+        <div class="card" id="mapCard">
+          <canvas id="map" aria-label="GPS track"></canvas>
+          <button class="b sec mapbtn" id="btnOsm" aria-pressed="false">Show map</button>
+          <div class="attr" id="osmAttr" hidden>© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors</div>
+          <div class="legend"><span>GPS speed</span><span class="n" id="legendLo"></span><i id="legendRamp"></i><span class="n" id="legendHi"></span></div>
+          <div class="maptip" id="mapTip" hidden><span id="mapTipText"></span> <button class="b sec" id="lineCancel">Cancel</button></div>
+        </div>
+        <div class="card" id="lapCard" hidden>
+          <div class="toolbar"><h3 style="margin:0" id="lapTitle">Laps</h3><span class="sp"></span><div class="seg" id="lapType"></div></div>
+          <div class="toolbar" id="lapTools"></div>
+          <p class="hint" id="lapSrc" style="margin:0 0 10px"></p>
+          <div class="laps" id="laps"></div>
+        </div>
+        <div class="card">
+          <div class="toolbar">
+            <span class="range n" id="range"></span><span class="sp"></span>
+            <button class="b sec" id="btnReset" disabled>Show all</button>
+          </div>
+          <div id="lanes"></div>
+          <canvas id="axis"></canvas>
+          <div class="hint">Drag across a chart to zoom in, double-click to show everything. Point at a chart or the track to see the values at that moment.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<footer><div class="wrap">
+  <span>PitLog Viewer – reads .pitlog files in your browser.</span>
+  <button type="button" id="btnPrivacy">Privacy</button>
+</div></footer>
+
+<dialog id="osmDlg" aria-labelledby="osmTitle">
+  <h2 id="osmTitle">Show the map from OpenStreetMap?</h2>
+  <p>Without the map, this page works entirely in your browser and sends nothing anywhere. To show a map under
+    the track, your browser loads map images from the OpenStreetMap tile server
+    (<b>tile.openstreetmap.org</b>, run by the OpenStreetMap Foundation, United Kingdom). The server
+    receives:</p>
+  <ul>
+    <li>your IP address and browser details, as with every website,</li>
+    <li>which map area is requested – that is, roughly <b>where this recording was made</b>.</li>
+  </ul>
+  <p>Your recording itself is not sent. The tile server's use of this data is described in the
+    <a href="https://osmfoundation.org/wiki/Privacy_Policy" target="_blank" rel="noopener">OpenStreetMap Foundation privacy policy</a>.
+    This page stores your choice in this browser (no cookie); you can switch the map off again at any time.</p>
+  <div class="row">
+    <button class="b sec" id="osmNo">Not now</button>
+    <button class="b" id="osmYes">Show the map</button>
+  </div>
+</dialog>
+
+<dialog id="privDlg" aria-labelledby="privTitle">
+  <h2 id="privTitle">Privacy</h2>
+  <ul>
+    <li><b>Your recordings stay on your device.</b> A .pitlog file you open is read by this page in your browser;
+      it is not uploaded, and exports are created in the browser as well.</li>
+    <li><b>No cookies, no tracking, no analytics.</b> Unless you switch on the map, the page loads nothing from other servers.</li>
+    <li><b>Stored in this browser:</b> only whether you switched on the map (local storage). Delete it with your
+      browser's site data.</li>
+    <li><b>Map (optional, off by default):</b> when you switch it on, map images are loaded from
+      tile.openstreetmap.org; that server receives your IP address and the map area of the recording.
+      <a href="https://osmfoundation.org/wiki/Privacy_Policy" target="_blank" rel="noopener">Its privacy policy</a>.</li>
+    <li><b>Where this page itself is hosted</b>, the host may log requests to the page (for example your IP
+      address) like any website – not your files. Saved as a file and opened locally, nothing is logged.</li>
+  </ul>
+  <div class="row"><button class="b" id="privClose">Close</button></div>
+</dialog>
+
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e}
+
+// ======================= reading .pitlog (SPEC.md) =======================
+const MAGIC=[0x89,0x50,0x49,0x54,0x4C,0x4F,0x47,0x0A];
+const CRC_TABLE=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}return t})();
+function crc32(u8,from,to){let c=0xFFFFFFFF;for(let i=from;i<to;i++)c=CRC_TABLE[(c^u8[i])&255]^(c>>>8);return (c^0xFFFFFFFF)>>>0}
+const utf8=new TextDecoder();
+const EVENTS={1:'Recording started',2:'Recording stopped',3:'Marker',4:'OBD adapter connected',5:'OBD adapter disconnected',6:'Vehicle stopped answering',7:'Statistics reset',8:'Power lost, file closed early'};
+const SOURCES={0:'system',1:'web interface',2:'smartphone app',3:'automation',4:'add-on module',5:'automatically at power-up'};
+const CH_SOURCES={1:'OBD-II',2:'GPS',3:'Modules',4:'PitLogger',5:'Vehicle profile'};
+const DTC_KINDS={1:'Stored',2:'Pending',3:'Permanent'};
+
+function parsePitlog(buf){
+  const u8=new Uint8Array(buf),dv=new DataView(buf);
+  if(u8.length<16||MAGIC.some((b,i)=>u8[i]!==b))throw new Error('This is not a .pitlog file.');
+  const major=u8[8],minor=u8[9];
+  if(major>1)throw new Error('This file has format version '+major+'.'+minor+' – this viewer reads version 1. Please use a newer viewer.');
+  const sid=dv.getUint32(12,true);
+  const out={version:major+'.'+minor,session:null,vehicle:null,channels:new Map(),gps:[],events:[],dtcs:[],sync:[],raw:0,laps:[],
+    blocks:0,gaps:[],cut:null,bytes:u8.length};
+  let pos=16,expectSeq=0;
+  const validAt=p=>{
+    if(p+20>u8.length||u8[p]!==0x50||u8[p+1]!==0x4C||u8[p+2]!==0x42||u8[p+3]!==0x4B)return 0;
+    if(dv.getUint32(p+4,true)!==sid)return 0;
+    const len=dv.getUint32(p+12,true);
+    if(len>1048576||p+16+len+4>u8.length)return 0;
+    return crc32(u8,p,p+16+len)===dv.getUint32(p+16+len,true)?len:0;
+  };
+  while(pos<u8.length){
+    let len=validAt(pos);
+    if(!len){   // damaged or cut off: everything before is valid; look for a later intact block (recovery)
+      let next=-1;
+      for(let p=pos+1;p+20<=u8.length;p++){if(u8[p]===0x50&&u8[p+1]===0x4C&&u8[p+2]===0x42&&u8[p+3]===0x4B&&validAt(p)){next=p;break}}
+      if(next<0){out.cut={at:pos,lost:u8.length-pos};break}
+      out.gaps.push({at:pos,bytes:next-pos});pos=next;len=validAt(pos);
+    }
+    const seq=dv.getUint32(pos+8,true);
+    if(seq!==expectSeq&&out.blocks)out.gaps.push({seq:expectSeq,missing:seq-expectSeq});
+    expectSeq=seq+1;out.blocks++;
+    readRecords(out,u8,dv,pos+16,pos+16+len);
+    pos+=16+len+4;
+  }
+  for(const c of out.channels.values()){c.t=Float64Array.from(c.ts);c.v=Float64Array.from(c.vs);delete c.ts;delete c.vs}
+  return out;
+}
+function readRecords(out,u8,dv,p,end){
+  while(p+3<=end){
+    const type=u8[p],len=dv.getUint16(p+1,true),b=p+3,e=b+len;p=e;
+    if(e>end)break;
+    let q=b;
+    const has=n=>q+n<=e,u32=()=>{const v=dv.getUint32(q,true);q+=4;return v},u16=()=>{const v=dv.getUint16(q,true);q+=2;return v},
+      i32=()=>{const v=dv.getInt32(q,true);q+=4;return v},f32=()=>{const v=dv.getFloat32(q,true);q+=4;return v},
+      byte=()=>u8[q++],str=()=>{if(!has(1))return '';const n=u8[q];const s=utf8.decode(u8.subarray(q+1,Math.min(q+1+n,e)));q+=1+n;return s};
+    try{
+      switch(type){
+        case 0x01:{const t=u32(),mac=[...u8.subarray(q,q+6)].map(x=>x.toString(16).padStart(2,'0')).join(':');q+=6;
+          out.session={t,mac,firmware:str(),source:has(1)?byte():0,preroll:has(4)?u32():0};break}
+        case 0x02:{const t=u32(),lo=dv.getUint32(q,true),hi=dv.getInt32(q+4,true);q+=8;out.sync.push({t,unix:hi*4294967296+lo,source:has(1)?byte():0});break}
+        case 0x03:{const t=u32();out.vehicle={t,vin:str(),protocol:str(),ecu:str(),calibration:str(),obd:has(1)?byte():0,fuel:has(1)?byte():0};break}
+        case 0x10:{const ch=u16(),source=byte(),sourceId=u16();byte();
+          const c={id:ch,source,sourceId,name:str(),unit:str(),decimals:has(1)?byte():1,min:has(4)?f32():NaN,max:has(4)?f32():NaN,key:'',metric:'',labels:null,ts:[],vs:[]};
+          if(has(1))c.key=str();if(has(1))c.metric=str();
+          if(has(1)){const n=byte();if(n){c.labels=new Map();for(let i=0;i<n&&has(5);i++){const v=i32();c.labels.set(v,str())}}}
+          const old=out.channels.get(ch);if(old){c.ts=old.ts;c.vs=old.vs}   // defined again (later block): keep its samples
+          out.channels.set(ch,c);break}
+        case 0x11:{const t=u32(),ch=u16(),v=f32(),c=out.channels.get(ch);if(c&&Number.isFinite(v)){c.ts.push(t);c.vs.push(v)}break}
+        case 0x12:case 0x13:out.raw++;break;
+        case 0x20:{const t=u32(),lat=i32()/1e7,lon=i32()/1e7,alt=i32()/100,speed=u16()/100,course=u16()/100,sats=byte(),fix=byte(),hdop=has(2)?u16()/100:0;
+          if(fix>=2&&(lat||lon))out.gps.push({t,lat,lon,alt,speed,course,sats,fix,hdop});break}
+        case 0x21:{const t=u32(),lap=u16(),ms=u32(),lat=i32()/1e7,lon=i32()/1e7,course=u16()/100,kind=has(1)?byte():0;out.laps.push({t,lap,ms,lat,lon,course,kind});break}
+        case 0x30:{const t=u32(),kind=byte(),mil=byte(),n=byte(),codes=[];
+          for(let i=0;i<n&&has(2);i++){codes.push(dtcText(u8[q],u8[q+1]));q+=2}
+          out.dtcs.push({t,kind,mil,codes});break}
+        case 0x40:{const t=u32(),ev=u16(),source=byte();out.events.push({t,event:ev,source,text:str()});break}
+      }
+    }catch(err){/* a record shorter than its fields: skip it */}
+  }
+}
+function dtcText(a,b){return 'PCBU'[a>>6]+((a>>4)&3)+(a&15).toString(16).toUpperCase()+b.toString(16).toUpperCase().padStart(2,'0')}
+
+// ======================= the session =======================
+let S=null;            // parsed file
+let chans=[];          // channels with samples, in list order
+let shown=[];          // channels in the charts
+let T0=0,T1=1,v0=0,v1=1;   // whole session, current view (ms)
+let cursor=null;       // time pointed at
+const SERIES=['--s1','--s2','--s3','--s4'];
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+// real time of a session time, if the file knows it
+function unixAt(t){let s=null;for(const x of S.sync)if(x.t<=t||!s)s=x;return s?s.unix+(t-s.t):null}
+const pad=n=>String(n).padStart(2,'0');
+function dur(ms,tenths){ms=Math.max(0,ms);const s=Math.floor(ms/1000),h=Math.floor(s/3600),m=Math.floor(s/60)%60;
+  return (h?h+':'+pad(m):m)+':'+pad(s%60)+(tenths?'.'+Math.floor(ms%1000/100):'')}
+function clock(t){const u=unixAt(t);if(u==null)return '';const d=new Date(u);return pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds())}
+function fmt(c,v){if(v==null||!Number.isFinite(v))return '–';if(c.labels&&c.labels.has(Math.round(v)))return c.labels.get(Math.round(v));
+  return v.toLocaleString(undefined,{minimumFractionDigits:c.decimals,maximumFractionDigits:c.decimals})}
+// last sample at or before t (within a few seconds), as index
+function idxAt(c,t){const a=c.t;let lo=0,hi=a.length-1;if(hi<0||a[0]>t)return -1;
+  while(lo<hi){const m=(lo+hi+1)>>1;if(a[m]<=t)lo=m;else hi=m-1}return t-a[lo]>5000?-1:lo}
+function lowerBound(a,t){let lo=0,hi=a.length;while(lo<hi){const m=(lo+hi)>>1;if(a[m]<t)lo=m+1;else hi=m}return lo}
+
+function open(file){
+  $('err').textContent='';
+  const r=new FileReader();
+  r.onload=()=>{
+    try{S=parsePitlog(r.result)}catch(e){$('err').textContent=e.message;return}
+    $('fileName').textContent=file.name;
+    start();
+  };
+  r.onerror=()=>{$('err').textContent='The file could not be read.'};
+  r.readAsArrayBuffer(file);
+}
+
+function start(){
+  chans=[...S.channels.values()].filter(c=>c.t.length);
+  let lo=Infinity,hi=-Infinity;
+  for(const c of chans){lo=Math.min(lo,c.t[0]);hi=Math.max(hi,c.t[c.t.length-1])}
+  for(const g of S.gps){lo=Math.min(lo,g.t);hi=Math.max(hi,g.t)}
+  for(const e of S.events){lo=Math.min(lo,e.t);hi=Math.max(hi,e.t)}
+  if(!Number.isFinite(lo)){lo=0;hi=1000}
+  T0=0;T1=Math.max(hi,T0+1000);v0=T0;v1=T1;cursor=null;
+  // first in the charts: the standard values a driver looks at, else the first few
+  const pref=['speed','engineSpeed','throttle','coolantTemp'];
+  shown=pref.map(m=>chans.find(c=>c.metric===m)).filter(Boolean);
+  if(!shown.length)shown=chans.slice(0,3);
+  $('drop').hidden=true;$('view').hidden=false;$('btnOpen2').hidden=false;
+  renderFacts();renderList();renderEvents();renderInfo();buildLanes();
+  $('mapCard').hidden=S.gps.length<2;
+  prepareMap();findLaps();renderFacts();draw();
+}
+
+function renderFacts(){
+  const f=$('facts');f.textContent='';
+  const add=(v,l)=>{const d=el('div','fact');d.append(el('b',null,v),el('span',null,l));f.append(d)};
+  const u=unixAt(0);
+  add(dur(T1-T0),'Duration');
+  const sp=chans.find(c=>c.metric==='speed')||chans.find(c=>c.source===2&&c.sourceId===1);
+  if(sp){let m=0;for(const v of sp.v)m=Math.max(m,v);add(Math.round(m)+' '+sp.unit,'Top speed')}
+  if(S.gps.length>1){let d=0;for(let i=1;i<S.gps.length;i++)d+=dist(S.gps[i-1],S.gps[i]);add((d/1000).toFixed(1)+' km','Distance (GPS)')}
+  if(laps.length){const b=laps.reduce((x,y)=>y.ms<x.ms?y:x),r=trk.sprint?'run':'lap';add(lapTime(b.ms),'Best '+r+' ('+r+' '+b.n+' of '+laps.length+')')}
+  const marks=S.events.filter(e=>e.event===3).length;if(marks)add(marks,marks===1?'Marker':'Markers');
+  const sub=[];
+  if(u!=null){const d=new Date(u);sub.push(d.toLocaleDateString(undefined,{weekday:'long',year:'numeric',month:'long',day:'numeric'})+', '+d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'}))}
+  else sub.push('Date unknown (no time source during the recording)');
+  if(S.vehicle&&S.vehicle.vin)sub.push('VIN '+S.vehicle.vin);
+  sub.push(chans.length+' values');
+  $('sub').textContent=sub.join(', ');
+  const w=$('warn');w.textContent='';
+  const warn=t=>w.append(el('div','warnbox',t));
+  if(S.cut)warn('The end of the file is incomplete ('+(S.cut.lost/1024).toFixed(1)+' KB) – usually the power was cut while recording. Everything before is shown.');
+  if(S.gaps.length)warn(S.gaps.length+' damaged '+(S.gaps.length===1?'part was':'parts were')+' skipped; the rest of the file is shown.');
+  if(S.events.some(e=>e.event===8))warn('The PitLogger lost its supply during this recording and closed the file early.');
+}
+function dist(a,b){const R=6371000,toR=Math.PI/180,dLa=(b.lat-a.lat)*toR,dLo=(b.lon-a.lon)*toR;
+  const x=Math.sin(dLa/2)**2+Math.cos(a.lat*toR)*Math.cos(b.lat*toR)*Math.sin(dLo/2)**2;return 2*R*Math.asin(Math.sqrt(x))}
+
+function renderList(){
+  const box=$('chlist'),find=$('chFind'),q=find.value.trim().toLowerCase();box.textContent='';
+  find.hidden=chans.length<=12;
+  const groups=new Map();
+  for(const c of chans){if(q&&!(c.name+' '+c.key+' '+c.unit).toLowerCase().includes(q)&&!shown.includes(c))continue;const g=CH_SOURCES[c.source]||'Other';if(!groups.has(g))groups.set(g,[]);groups.get(g).push(c)}
+  for(const [g,list] of groups){
+    box.append(el('div','grp',g));
+    for(const c of list){
+      const row=el('label','ch'),cb=el('input');cb.type='checkbox';cb.checked=shown.includes(c);
+      cb.onchange=()=>{if(cb.checked)shown.push(c);else shown=shown.filter(x=>x!==c);buildLanes();draw()};
+      row.append(cb,el('span','nm',c.name),el('span','u',c.unit||''));row.title=c.name+(c.key?' ('+c.key+')':'')+', '+c.t.length.toLocaleString()+' samples';
+      box.append(row);
+    }
+  }
+  if(!chans.length)box.append(el('p','muted','This recording has no measured values.'));
+  else if(!box.childElementCount)box.append(el('p','muted','No value matches “'+find.value.trim()+'”.'));
+}
+$('chFind').oninput=renderList;
+
+function renderEvents(){
+  const box=$('events');box.textContent='';
+  const evs=S.events.filter(e=>e.event!==4&&e.event!==5);
+  for(const e of evs){
+    const it=el('button','it');it.type='button';
+    let txt=EVENTS[e.event]||'Event '+e.event;
+    if(e.event===1&&e.source)txt+=' ('+(SOURCES[e.source]||'')+')';
+    if(e.text)txt+=': '+e.text;
+    it.append(el('span','t',dur(e.t)),el('span',null,txt));
+    it.onclick=()=>{const w=Math.min(T1-T0,Math.max(20000,(v1-v0)));setView(e.t-w/2,e.t+w/2);cursor=e.t;draw()};
+    box.append(it);
+  }
+  $('evCard').hidden=!evs.length;
+  const d=$('dtcs');d.textContent='';
+  // the last list of each kind is what the vehicle reported most recently
+  const last=new Map();for(const x of S.dtcs)last.set(x.kind,x);
+  for(const [k,x] of [...last].sort((a,b)=>a[0]-b[0])){
+    const it=el('div','it');
+    it.append(el('span','t',DTC_KINDS[k]||'Kind '+k),x.codes.length?el('span','dtc',x.codes.join(', ')):el('span','muted','none'));
+    d.append(it);
+  }
+  const mil=[...last.values()].find(x=>x.mil===1);
+  if(mil)d.append(el('div','it warnrow','Check engine lamp on'));
+  $('dtcCard').hidden=!last.size;
+}
+
+function renderInfo(){
+  const kv=$('info');kv.textContent='';
+  const add=(k,v)=>{if(v)kv.append(el('span',null,k),el('span',null,v))};
+  const s=S.session||{};
+  add('Device',s.firmware);
+  add('Logger',s.mac);
+  add('Started by',SOURCES[s.source]);
+  if(s.preroll)add('Before the start',dur(s.preroll)+' kept');
+  const v=S.vehicle||{};
+  add('Vehicle',v.vin);add('Protocol',v.protocol);add('Control unit',v.ecu);add('Calibration',v.calibration);
+  add('GPS fixes',S.gps.length?S.gps.length.toLocaleString():'');
+  add('Raw answers',S.raw?S.raw.toLocaleString():'');
+  add('File',(S.bytes/1024).toFixed(1)+' KB, format '+S.version+', '+S.blocks+' blocks');
+}
+
+// ======================= charts: one lane per value, shared time axis =======================
+let lanes=[];
+function buildLanes(){
+  const box=$('lanes');box.textContent='';lanes=[];
+  if(!shown.length){box.append(el('p','empty','Choose values on the left to see them here.'));return}
+  shown.forEach((c,i)=>{
+    const lane=el('div','lane'),hd=el('div','hd'),sw=el('span','sw'),cv=el('canvas');
+    const color=css(i<SERIES.length?SERIES[i]:'--muted');sw.style.background=color;   // four colours, then plain ink: never repeated
+    const rd=el('span','rd n'),mm=el('span','mm');
+    hd.append(sw,el('span','nm',c.name),el('span','muted',c.unit),mm,rd);lane.append(hd,cv);box.append(lane);
+    lanes.push({c,cv,rd,mm,color});
+    hookChart(cv);
+  });
+}
+function sizeCanvas(cv){const r=cv.getBoundingClientRect(),d=window.devicePixelRatio||1;
+  const w=Math.max(1,Math.round(r.width*d)),h=Math.max(1,Math.round(r.height*d));
+  if(cv.width!==w||cv.height!==h){cv.width=w;cv.height=h}const g=cv.getContext('2d');g.setTransform(d,0,0,d,0,0);return [g,r.width,r.height]}
+const xOf=(t,w)=>(t-v0)/(v1-v0)*w;
+const tOf=(x,w)=>v0+x/w*(v1-v0);
+
+function drawLane(L){
+  const [g,w,h]=sizeCanvas(L.cv),c=L.c,pt=6,pb=6;
+  g.clearRect(0,0,w,h);
+  const i0=Math.max(0,lowerBound(c.t,v0)-1),i1=Math.min(c.t.length,lowerBound(c.t,v1)+1);
+  let lo=Infinity,hi=-Infinity;
+  for(let i=i0;i<i1;i++){const v=c.v[i];if(v<lo)lo=v;if(v>hi)hi=v}
+  if(!Number.isFinite(lo)){L.mm.textContent='';g.fillStyle=css('--muted');g.font='12px system-ui';g.fillText('no values in this range',8,h/2);return}
+  const vis=[];for(let i=Math.max(i0,lowerBound(c.t,v0));i<i1&&c.t[i]<=v1;i++)vis.push(c.v[i]);
+  let vlo=Infinity,vhi=-Infinity,sum=0;for(const v of vis){vlo=Math.min(vlo,v);vhi=Math.max(vhi,v);sum+=v}
+  L.mm.textContent=vis.length?(c.labels?'':fmt(c,vlo)+' – '+fmt(c,vhi)+', avg '+fmt(c,sum/vis.length)):'';
+  if(hi===lo){hi+=1;lo-=1}
+  const pad=(hi-lo)*0.06;lo-=pad;hi+=pad;
+  const yOf=v=>pt+(1-(v-lo)/(hi-lo))*(h-pt-pb);
+  // grid: three quiet lines; their values on top of the curve at the end
+  const grid=[0.15,0.5,0.85].map(f=>lo+(hi-lo)*(1-f));
+  g.strokeStyle=css('--grid');g.lineWidth=1;
+  for(const v of grid){const y=Math.round(yOf(v))+.5;g.beginPath();g.moveTo(0,y);g.lineTo(w,y);g.stroke()}
+  markersOn(g,w,h);
+  g.strokeStyle=L.color;g.lineWidth=2;g.lineJoin='round';g.beginPath();
+  const step=!!c.labels,gapMs=Math.max(5000,(v1-v0)/w*20);
+  let first=true,lastT=0,lastY=0;
+  // many samples per pixel: per column the lowest and highest value (shape stays, cost stays low)
+  if(i1-i0>w*3){
+    let col=-1,cmin=0,cmax=0,cfirst=0,clast=0;
+    const flush=()=>{if(col<0)return;const x=col+.5;if(first){g.moveTo(x,yOf(cfirst));first=false}else g.lineTo(x,yOf(cfirst));g.lineTo(x,yOf(cmin));g.lineTo(x,yOf(cmax));g.lineTo(x,yOf(clast))};
+    for(let i=i0;i<i1;i++){const t=c.t[i],v=c.v[i],x=Math.floor(xOf(t,w));
+      if(t-lastT>gapMs&&!first){flush();col=-1;first=true}
+      if(x!==col){flush();col=x;cmin=cmax=cfirst=clast=v}else{cmin=Math.min(cmin,v);cmax=Math.max(cmax,v);clast=v}lastT=t}
+    flush();
+  }else{
+    for(let i=i0;i<i1;i++){const t=c.t[i],x=xOf(t,w),y=yOf(c.v[i]);
+      if(first||t-lastT>gapMs){g.moveTo(x,y);first=false}else{if(step)g.lineTo(x,lastY);g.lineTo(x,y)}
+      lastT=t;lastY=y}
+  }
+  g.stroke();
+  if(!step){   // with a halo in the card colour, readable over the curve
+    g.font='11px '+css('--num');g.lineJoin='round';g.lineWidth=3;g.strokeStyle=css('--card');g.fillStyle=css('--muted');
+    for(const v of grid){const y=Math.round(yOf(v))-3;g.strokeText(fmt(c,v),4,y);g.fillText(fmt(c,v),4,y)}
+  }
+  if(step){   // the texts of the states, at the levels used
+    g.fillStyle=css('--muted');g.font='11px system-ui';
+    const used=new Set(vis.map(Math.round));for(const [v,txt] of c.labels)if(used.has(v)){const y=yOf(v);if(y>10&&y<h-2)g.fillText(txt,w-g.measureText(txt).width-4,y-3)}
+  }
+  if(cursor!=null&&cursor>=v0&&cursor<=v1){
+    const x=Math.round(xOf(cursor,w))+.5;g.strokeStyle=css('--text');g.globalAlpha=.55;g.lineWidth=1;g.beginPath();g.moveTo(x,0);g.lineTo(x,h);g.stroke();g.globalAlpha=1;
+    const i=idxAt(c,cursor);if(i>=0){const y=yOf(c.v[i]);g.fillStyle=L.color;g.strokeStyle=css('--card');g.lineWidth=2;g.beginPath();g.arc(xOf(c.t[i],w),y,4.5,0,7);g.fill();g.stroke()}
+  }
+}
+function markersOn(g,w,h){
+  g.save();g.lineWidth=1;g.strokeStyle=css('--line2');   // where laps start: solid and quiet
+  for(const t of crossings){if(t<v0||t>v1)continue;const x=Math.round(xOf(t,w))+.5;g.beginPath();g.moveTo(x,0);g.lineTo(x,h);g.stroke()}
+  g.setLineDash([3,4]);
+  for(const e of S.events){if(e.event!==3&&e.event!==1&&e.event!==2)continue;if(e.t<v0||e.t>v1)continue;
+    const x=Math.round(xOf(e.t,w))+.5;g.strokeStyle=e.event===3?css('--warn'):css('--line2');g.beginPath();g.moveTo(x,0);g.lineTo(x,h);g.stroke()}
+  g.restore();
+}
+function drawAxis(){
+  const cv=$('axis'),[g,w,h]=sizeCanvas(cv);g.clearRect(0,0,w,h);
+  const span=v1-v0,steps=[1e3,2e3,5e3,1e4,15e3,3e4,6e4,12e4,3e5,6e5,9e5,18e5,36e5];
+  const st=steps.find(s=>span/s<=Math.max(2,w/90))||36e5;
+  g.fillStyle=css('--muted');g.strokeStyle=css('--line2');g.font='11px '+css('--num');g.textBaseline='top';
+  for(let t=Math.ceil(v0/st)*st;t<=v1;t+=st){const x=Math.round(xOf(t,w))+.5;g.beginPath();g.moveTo(x,0);g.lineTo(x,4);g.stroke();
+    const txt=dur(t,st<1000);const tw=g.measureText(txt).width;g.fillText(txt,Math.min(w-tw,Math.max(0,x-tw/2)),7)}
+}
+function updateReadouts(){
+  for(const L of lanes){const i=cursor==null?-1:idxAt(L.c,cursor);L.rd.textContent=i<0?'':fmt(L.c,L.c.v[i])}
+  const r=$('range'),clk=cursor!=null?clock(cursor):'';
+  r.textContent=(cursor!=null?'at '+dur(cursor,true)+(clk?' ('+clk+')':'')+'   ':'')+(v0>T0||v1<T1?'showing '+dur(v0)+' – '+dur(v1):'');
+}
+
+let raf=0;
+function draw(){if(raf)return;raf=requestAnimationFrame(()=>{raf=0;for(const L of lanes)drawLane(L);drawAxis();drawMap();updateReadouts()})}
+function setView(a,b){
+  const minSpan=1000;if(b-a<minSpan){const m=(a+b)/2;a=m-minSpan/2;b=m+minSpan/2}
+  if(a<T0){b+=T0-a;a=T0}if(b>T1){a-=b-T1;b=T1}v0=Math.max(T0,a);v1=Math.min(T1,b);
+  $('btnReset').disabled=v0<=T0&&v1>=T1;draw();
+}
+
+// pointing, zooming by dragging, double-click for everything
+let dragFrom=null,dragBox=null;
+function hookChart(cv){
+  const tAt=e=>{const r=cv.getBoundingClientRect();return tOf(Math.max(0,Math.min(r.width,e.clientX-r.left)),r.width)};
+  cv.addEventListener('pointermove',e=>{
+    cursor=tAt(e);
+    if(dragFrom!=null)showDrag(cv,dragFrom,cursor);
+    draw();
+  });
+  cv.addEventListener('pointerleave',()=>{if(dragFrom==null){cursor=null;draw()}});
+  cv.addEventListener('pointerdown',e=>{if(e.button!==0||e.pointerType==='touch')return;dragFrom=tAt(e);cv.setPointerCapture(e.pointerId)});
+  cv.addEventListener('pointerup',e=>{
+    if(dragFrom==null)return;const to=tAt(e),a=Math.min(dragFrom,to),b=Math.max(dragFrom,to);dragFrom=null;hideDrag();
+    const r=cv.getBoundingClientRect();if(Math.abs(xOf(b,r.width)-xOf(a,r.width))>6)setView(a,b);
+  });
+  cv.addEventListener('dblclick',()=>setView(T0,T1));
+  cv.addEventListener('wheel',e=>{   // with Ctrl: zoom around the pointer, otherwise the page scrolls
+    if(!e.ctrlKey)return;e.preventDefault();const t=tAt(e),k=e.deltaY>0?1.25:0.8;setView(t-(t-v0)*k,t+(v1-t)*k);
+  },{passive:false});
+}
+function showDrag(cv,a,b){
+  if(!dragBox){dragBox=el('div');dragBox.style.cssText='position:absolute;top:0;bottom:0;background:color-mix(in srgb,var(--acc) 18%,transparent);border-left:1px solid var(--acc);border-right:1px solid var(--acc);pointer-events:none';$('lanes').append(dragBox)}
+  const r=cv.getBoundingClientRect(),x1=xOf(Math.min(a,b),r.width),x2=xOf(Math.max(a,b),r.width);
+  dragBox.style.left=x1+'px';dragBox.style.width=(x2-x1)+'px';
+}
+function hideDrag(){if(dragBox){dragBox.remove();dragBox=null}}
+$('btnReset').onclick=()=>setView(T0,T1);
+window.addEventListener('keydown',e=>{if(e.key==='Escape'&&S)setView(T0,T1)});
+
+// ======================= GPS track =======================
+let proj=null;   // local metres around the track's centre
+function prepareMap(){
+  proj=null;if(S.gps.length<2)return;
+  let la0=Infinity,la1=-Infinity,lo0=Infinity,lo1=-Infinity,smin=Infinity,smax=-Infinity;
+  for(const g of S.gps){la0=Math.min(la0,g.lat);la1=Math.max(la1,g.lat);lo0=Math.min(lo0,g.lon);lo1=Math.max(lo1,g.lon);smin=Math.min(smin,g.speed);smax=Math.max(smax,g.speed)}
+  const lat=(la0+la1)/2,lon=(lo0+lo1)/2,kx=111320*Math.cos(lat*Math.PI/180),ky=110540;
+  const pts=S.gps.map(g=>({x:(g.lon-lon)*kx,y:(g.lat-lat)*ky,t:g.t,s:g.speed}));
+  proj={pts,w:(lo1-lo0)*kx,h:(la1-la0)*ky,smin,smax:Math.max(smax,smin+1),lat,lon,kx,ky};
+  $('legendLo').textContent=Math.round(smin)+' km/h';$('legendHi').textContent=Math.round(smax)+' km/h';
+  const ramp=$('legendRamp');ramp.style.background='linear-gradient(90deg,'+[0,.25,.5,.75,1].map(f=>speedColor(f)).join(',')+')';
+}
+// slow to fast: one hue, dark to light (light to dark in the light theme)
+function speedColor(f){return mix(css('--slow'),css('--fast'),f)}
+function mix(a,b,f){const p=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16)),x=p(a),y=p(b);
+  return '#'+x.map((v,i)=>Math.round(v+(y[i]-v)*f).toString(16).padStart(2,'0')).join('')}
+function mapFit(w,h){const m=24,s=Math.min((w-2*m)/Math.max(proj.w,1),(h-2*m)/Math.max(proj.h,1));return {s,cx:w/2,cy:h/2}}
+function drawMap(){
+  if(!proj||$('mapCard').hidden)return;
+  const cv=$('map'),[g,w,h]=sizeCanvas(cv);g.clearRect(0,0,w,h);
+  const {s,cx,cy}=mapFit(w,h),P=p=>[cx+p.x*s,cy-p.y*s],pts=proj.pts;
+  if(osmOn)drawTiles(g,w,h,s,cx,cy,P);
+  g.lineCap='round';g.lineJoin='round';
+  // the whole track underneath, the shown time range on top, coloured by speed
+  g.strokeStyle=css('--track');g.lineWidth=3;g.beginPath();pts.forEach((p,i)=>{const [x,y]=P(p);i?g.lineTo(x,y):g.moveTo(x,y)});g.stroke();
+  g.lineWidth=3.5;
+  for(let i=1;i<pts.length;i++){const a=pts[i-1],b=pts[i];if(b.t<v0||a.t>v1||b.t-a.t>5000)continue;
+    const [x1,y1]=P(a),[x2,y2]=P(b);g.strokeStyle=speedColor((b.s-proj.smin)/(proj.smax-proj.smin));g.beginPath();g.moveTo(x1,y1);g.lineTo(x2,y2);g.stroke()}
+  // the lines: bars across the track; the finish (and a circuit's start/finish) chequered
+  const bar=(L,chequered)=>{const p={x:(L.lon-proj.lon)*proj.kx,y:(L.lat-proj.lat)*proj.ky},[x,y]=P(p),c=L.course*Math.PI/180,
+    nx=Math.cos(c),ny=Math.sin(c),r=Math.max(9,25*s);   // across the direction of travel (screen y points down)
+    g.lineCap='butt';g.lineWidth=5;g.strokeStyle=chequered?css('--text'):css('--ok');g.beginPath();g.moveTo(x-nx*r,y-ny*r);g.lineTo(x+nx*r,y+ny*r);g.stroke();
+    if(chequered){g.strokeStyle=css('--card');g.setLineDash([4,4]);g.beginPath();g.moveTo(x-nx*r,y-ny*r);g.lineTo(x+nx*r,y+ny*r);g.stroke();g.setLineDash([])}
+    g.lineCap='round'};
+  if(trk.start)bar(trk.start,!trk.sprint);
+  if(trk.sprint&&trk.finish)bar(trk.finish,true);
+  // markers on the track
+  for(const e of S.events){if(e.event!==3)continue;const p=gpsAt(e.t);if(!p)continue;const [x,y]=P(p);
+    g.fillStyle=css('--warn');g.beginPath();g.moveTo(x,y-9);g.lineTo(x+5,y-1);g.lineTo(x-5,y-1);g.closePath();g.fill()}
+  // start of the recording
+  {const [x,y]=P(pts[0]);g.fillStyle=css('--muted');g.beginPath();g.arc(x,y,3,0,7);g.fill()}
+  if(cursor!=null){const p=gpsAt(cursor);if(p){const [x,y]=P(p);
+    g.fillStyle=css('--text');g.strokeStyle=css('--card');g.lineWidth=3;g.beginPath();g.arc(x,y,6,0,7);g.fill();g.stroke()}}
+}
+// ---- optional map underneath (OpenStreetMap tiles; only after the user agreed) ----
+let osmOn=false;
+try{osmOn=localStorage.getItem('pitlogOsm')==='1'}catch(e){}
+const tiles=new Map();   // "z/x/y" -> image, loaded once per page
+function tileImg(z,x,y){const k=z+'/'+x+'/'+y;let im=tiles.get(k);
+  if(!im){im=new Image();im.onload=()=>draw();im.src='https://tile.openstreetmap.org/'+k+'.png';tiles.set(k,im)}return im}
+function drawTiles(g,w,h,s,cx,cy,P){
+  // screen -> degrees, the zoom whose pixels are about the size of ours
+  const lonAt=x=>proj.lon+(x-cx)/s/proj.kx,latAt=y=>proj.lat+(cy-y)/s/proj.ky;
+  const d=window.devicePixelRatio||1,z=Math.max(1,Math.min(19,Math.round(Math.log2(156543.03*Math.cos(proj.lat*Math.PI/180)*s*d)))),n=2**z;
+  const tx=lon=>Math.floor((lon+180)/360*n),ty=lat=>{const r=lat*Math.PI/180;return Math.floor((1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*n)};
+  const lonOf=x=>x/n*360-180,latOf=y=>Math.atan(Math.sinh(Math.PI*(1-2*y/n)))*180/Math.PI;
+  const x0=tx(lonAt(0)),x1=tx(lonAt(w)),y0=ty(latAt(0)),y1=ty(latAt(h));
+  if((x1-x0+1)*(y1-y0+1)>80)return;   // never a flood of requests
+  g.save();
+  if(matchMedia('(prefers-color-scheme: dark)').matches)g.filter='invert(1) hue-rotate(180deg) brightness(.85) contrast(.85)';
+  for(let x=x0;x<=x1;x++)for(let y=y0;y<=y1;y++){
+    const im=tileImg(z,x,y);if(!im.complete||!im.naturalWidth)continue;
+    const [ax,ay]=P({x:(lonOf(x)-proj.lon)*proj.kx,y:(latOf(y)-proj.lat)*proj.ky}),[bx,by]=P({x:(lonOf(x+1)-proj.lon)*proj.kx,y:(latOf(y+1)-proj.lat)*proj.ky});
+    g.drawImage(im,ax,ay,bx-ax+.5,by-ay+.5);
+  }
+  g.restore();
+}
+function setOsm(on){
+  osmOn=on;try{localStorage.setItem('pitlogOsm',on?'1':'0')}catch(e){}
+  $('btnOsm').textContent=on?'Hide map':'Show map';$('btnOsm').setAttribute('aria-pressed',on);$('osmAttr').hidden=!on;draw();
+}
+$('btnOsm').onclick=()=>{if(osmOn)setOsm(false);else $('osmDlg').showModal()};
+$('osmYes').onclick=()=>{$('osmDlg').close();setOsm(true)};
+$('osmNo').onclick=()=>$('osmDlg').close();
+$('btnPrivacy').onclick=()=>$('privDlg').showModal();
+$('privClose').onclick=()=>$('privDlg').close();
+setOsm(osmOn);
+
+function gpsAt(t){const pts=proj.pts;let lo=0,hi=pts.length-1;if(t<pts[0].t-2000||t>pts[hi].t+2000)return null;
+  while(lo<hi){const m=(lo+hi+1)>>1;if(pts[m].t<=t)lo=m;else hi=m-1}
+  const a=pts[lo],b=pts[Math.min(lo+1,pts.length-1)];if(b===a||b.t-a.t>5000)return a;
+  const f=(t-a.t)/(b.t-a.t);return {x:a.x+(b.x-a.x)*f,y:a.y+(b.y-a.y)*f}}
+$('map').addEventListener('pointermove',e=>{
+  if(!proj)return;const cv=$('map'),r=cv.getBoundingClientRect(),{s,cx,cy}=mapFit(r.width,r.height);
+  const mx=(e.clientX-r.left-cx)/s,my=-(e.clientY-r.top-cy)/s;
+  let best=null,bd=Infinity;   // nearest point of the shown range
+  for(const p of proj.pts){if(p.t<v0||p.t>v1)continue;const d=(p.x-mx)**2+(p.y-my)**2;if(d<bd){bd=d;best=p}}
+  cursor=best&&Math.sqrt(bd)*s<30?best.t:null;draw();
+});
+$('map').addEventListener('pointerleave',()=>{cursor=null;draw()});
+$('map').addEventListener('click',e=>{
+  if(!placing||!proj)return;const cv=$('map'),r=cv.getBoundingClientRect(),{s,cx,cy}=mapFit(r.width,r.height);
+  const mx=(e.clientX-r.left-cx)/s,my=-(e.clientY-r.top-cy)/s;
+  let bi=-1,bd=Infinity;for(let i=0;i<proj.pts.length;i++){const p=proj.pts[i],d=(p.x-mx)**2+(p.y-my)**2;if(d<bd&&S.gps[i].speed>=15){bd=d;bi=i}}
+  if(bi<0||Math.sqrt(bd)*s>30)return;   // not on the track
+  const g=S.gps[bi],gate={lat:g.lat,lon:g.lon,course:g.course};
+  if(placing==='finish')trk.finish=gate;else trk.start=gate;
+  trk.from='set by you';placeLine(false);computeLaps();renderFacts();draw();
+});
+let placing=false;   // which line the next click on the track sets: 'start' | 'finish'
+function placeLine(what){
+  placing=what;$('mapTip').hidden=!what;$('map').classList.toggle('placing',!!what);
+  if(what){$('mapTipText').textContent='Click on the track where the '+(what==='finish'?'finish':trk.sprint?'start':'start/finish')+' line is.';
+    $('mapCard').scrollIntoView({block:'nearest',behavior:'smooth'})}
+}
+$('lineCancel').onclick=()=>placeLine(false);
+
+// ======================= laps (the rule of the PitLogger, SPEC 4.8a) =======================
+// a circuit: one start/finish line; a sprint (Bridge to Gate, hill climb): start line to finish line
+let trk={sprint:false,start:null,finish:null,from:''},laps=[],crossings=[],lapOn=null;
+const LAP_HALF_WIDTH=25,LAP_MIN_MS=15000;
+function lapTime(ms){const m=Math.floor(ms/60000),s=(ms%60000)/1000;return m+':'+s.toFixed(3).padStart(6,'0')}
+// did the way from a to b cross the line forwards? -> where between them (0 ... 1), else -1
+function crossing(L,a,b){
+  const kx=111320*Math.cos(L.lat*Math.PI/180),ky=110540,c=L.course*Math.PI/180,dx=Math.sin(c),dy=Math.cos(c);
+  const ax=(a.lon-L.lon)*kx,ay=(a.lat-L.lat)*ky,bx=(b.lon-L.lon)*kx,by=(b.lat-L.lat)*ky;
+  const sa=ax*dx+ay*dy,sb=bx*dx+by*dy;
+  if(!(sa<0&&sb>=0)||Math.hypot(bx-ax,by-ay)>250)return -1;
+  const f=-sa/(sb-sa),px=ax+(bx-ax)*f,py=ay+(by-ay)*f;
+  return Math.abs(px*dy-py*dx)<=LAP_HALF_WIDTH?f:-1;
+}
+function crossTimes(L){
+  const out=[],G=S.gps;
+  for(let i=1;i<G.length;i++){const a=G[i-1],b=G[i];if(b.t-a.t>3000)continue;const f=crossing(L,a,b);if(f<0)continue;
+    const t=a.t+(b.t-a.t)*f;if(!out.length||t-out[out.length-1]>=LAP_MIN_MS)out.push(t)}
+  return out;
+}
+// the lines: the PitLogger's (LAP records), else (circuit) the place the car passed most often
+function findLaps(){
+  trk={sprint:false,start:null,finish:null,from:''};
+  const gate=l=>({lat:l.lat,lon:l.lon,course:l.course});
+  const st=S.laps.filter(l=>l.kind===1),fi=S.laps.filter(l=>l.kind===2),ci=S.laps.filter(l=>!l.kind);
+  if(st.length||fi.length)trk={sprint:true,start:st.length?gate(st.at(-1)):null,finish:fi.length?gate(fi.at(-1)):null,from:'the PitLogger\'s track'};
+  else if(ci.length){trk.start=gate(ci.at(-1));trk.from='the PitLogger\'s start/finish line'}
+  else if(S.gps.length>50){
+    let best=null,bn=1;const step=Math.max(1,Math.floor(S.gps.length/400));
+    for(let i=0;i<S.gps.length;i+=step){const g=S.gps[i];if(g.speed<30)continue;
+      const n=crossTimes(g).length;if(n>bn||(n===bn&&best&&g.speed>best.speed)){bn=n;best=g}}
+    if(best&&bn>=2){trk.start=gate(best);trk.from='found automatically – the lap times are right, the line may not be the real start/finish'}
+  }
+  computeLaps();
+}
+function computeLaps(){
+  laps=[];crossings=[];
+  if(!trk.sprint&&trk.start){
+    crossings=crossTimes(trk.start);
+    for(let i=1;i<crossings.length;i++)laps.push({n:i,t0:crossings[i-1],t1:crossings[i],ms:crossings[i]-crossings[i-1]});
+  }else if(trk.sprint&&trk.start&&trk.finish){   // a run: the last start crossing before a finish crossing
+    const ev=[...crossTimes(trk.start).map(t=>[t,0]),...crossTimes(trk.finish).map(t=>[t,1])].sort((a,b)=>a[0]-b[0]);
+    let from=null;
+    for(const [t,k] of ev){
+      if(k===0){if(from==null||t-from>=LAP_MIN_MS)from=t}
+      else if(from!=null&&t-from>=LAP_MIN_MS){laps.push({n:laps.length+1,t0:from,t1:t,ms:t-from});crossings.push(from,t);from=null}
+    }
+  }
+  lapOn=null;renderLaps();
+}
+function renderLaps(){
+  const card=$('lapCard'),box=$('laps');box.textContent='';
+  card.hidden=S.gps.length<2;if(card.hidden)return;
+  const run=trk.sprint?'run':'lap',runs=trk.sprint?'runs':'laps';
+  $('lapTitle').textContent=trk.sprint?'Runs':'Laps';
+  // circuit or sprint
+  const seg=$('lapType');seg.textContent='';
+  for(const [sprint,label] of [[false,'Circuit'],[true,'Sprint']]){
+    const b=el('button',null,label);b.type='button';b.setAttribute('aria-pressed',trk.sprint===sprint);
+    b.title=sprint?'Start line and a different finish line (e.g. Bridge to Gate, hill climb)':'One start/finish line, a lap ends at every crossing';
+    b.onclick=()=>{if(trk.sprint===sprint)return;trk={sprint,start:trk.start,finish:null,from:'set by you'};computeLaps();renderFacts();draw()};
+    seg.append(b);
+  }
+  const tools=$('lapTools');tools.textContent='';
+  const tool=(label,fn,primary)=>{const b=el('button',primary?'b':'b sec',label);b.type='button';b.onclick=fn;tools.append(b)};
+  if(trk.sprint){
+    tool(trk.start?'Move start line':'Set start line',()=>placeLine('start'),!trk.start);
+    tool(trk.finish?'Move finish line':'Set finish line',()=>placeLine('finish'),!!trk.start&&!trk.finish);
+  }else tool(trk.start?'Move start/finish line':'Set start/finish line',()=>placeLine('start'),!trk.start);
+  if(trk.start&&(!trk.sprint||trk.finish))tool('Export track',exportTrack);
+  $('lapSrc').textContent=
+    trk.sprint&&!trk.start?'Set the start line and the finish line on the map.':
+    trk.sprint&&!trk.finish?'Now set the finish line on the map.':
+    !trk.start?'No laps found. If this was on a closed track, set the start/finish line on the map; for a route with a different finish, choose Sprint.':
+    laps.length?laps.length+' '+(laps.length===1?run:runs)+', lines: '+trk.from+'.':
+    'No full '+run+' across '+(trk.sprint?'these lines':'this line')+' ('+trk.from+').';
+  if(!laps.length)return;
+  const best=laps.reduce((x,y)=>y.ms<x.ms?y:x);
+  for(const l of laps){
+    const b=el('button','lap'+(l===best?' best':'')+(l===lapOn?' on':''));b.type='button';
+    b.append(el('span','no',(trk.sprint?'Run ':'Lap ')+l.n),el('span','tm',lapTime(l.ms)),el('span','gap',l===best?'best':'+'+((l.ms-best.ms)/1000).toFixed(3)));
+    b.title='Show '+run+' '+l.n;
+    b.onclick=()=>{if(lapOn===l){lapOn=null;setView(T0,T1)}else{lapOn=l;setView(l.t0-1000,l.t1+1000)}renderLaps()};
+    box.append(b);
+  }
+}
+// the track as a file for the tracks repository (and the PitLogger's built-in tracks)
+function exportTrack(){
+  const name=prompt('Name of the track','');if(!name||!name.trim())return;
+  const country=(prompt('Country (two letters, e.g. DE)','DE')||'').trim().toUpperCase();if(!/^[A-Z]{2}$/.test(country))return;
+  const id=country.toLowerCase()+'-'+name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40);
+  const g=L=>({lat:+L.lat.toFixed(7),lon:+L.lon.toFixed(7),course:+L.course.toFixed(1)});
+  const t={id,name:name.trim().slice(0,47),country,type:trk.sprint?'sprint':'circuit',start:g(trk.start)};
+  if(trk.sprint)t.finish=g(trk.finish);
+  if(laps.length&&S.gps.length){   // length from GPS: the best run
+    const b=laps.reduce((x,y)=>y.ms<x.ms?y:x);let m=0,last=null;
+    for(const p of S.gps){if(p.t<b.t0||p.t>b.t1)continue;if(last)m+=dist(last,p);last=p}t.length_m=Math.round(m);
+  }
+  t.source='measured with a PitLogger'+(unixAt(0)!=null?', '+new Date(unixAt(0)).toISOString().slice(0,7):'');
+  download(id+'.json',JSON.stringify(t,null,2)+'\n','application/json');
+}
+
+// ======================= export (in the browser, nothing is sent) =======================
+function download(name,text,type){const a=el('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;document.body.append(a);a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1000)}
+const base=()=>($('fileName').textContent||'recording').replace(/\.pitlog$/i,'');
+const csvq=s=>/[",;\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;
+const iso=t=>{const u=unixAt(t);return u==null?'':new Date(u).toISOString()};
+$('expCsv').onclick=()=>{
+  const cols=chans,rows=['time_s,utc,'+cols.map(c=>csvq(c.name+(c.unit?' ['+c.unit+']':''))).join(',')+(S.gps.length?',latitude,longitude':'')];
+  const idx=cols.map(c=>Math.max(0,lowerBound(c.t,v0)-1));let gi=0;
+  for(let t=Math.ceil(v0/100)*100;t<=v1;t+=100){
+    const vals=cols.map((c,k)=>{while(idx[k]+1<c.t.length&&c.t[idx[k]+1]<=t)idx[k]++;const i=idx[k];
+      return c.t[i]<=t&&t-c.t[i]<=5000?String(+c.v[i].toFixed(Math.max(c.decimals,1))):''});
+    let gps='';if(S.gps.length){while(gi+1<S.gps.length&&S.gps[gi+1].t<=t)gi++;const g=S.gps[gi];gps=g.t<=t&&t-g.t<=2000?','+g.lat.toFixed(7)+','+g.lon.toFixed(7):',,'}
+    rows.push((t/1000).toFixed(1)+','+iso(t)+','+vals.join(',')+gps);
+  }
+  download(base()+'.csv',rows.join('\n'),'text/csv');
+};
+$('expLong').onclick=()=>{
+  const rows=['time_s,utc,key,name,value,unit'];
+  const all=[];for(const c of chans){const a=lowerBound(c.t,v0),b=lowerBound(c.t,v1+1);for(let i=a;i<b;i++)all.push([c.t[i],c,c.v[i]])}
+  all.sort((x,y)=>x[0]-y[0]);
+  for(const [t,c,v] of all)rows.push((t/1000).toFixed(3)+','+iso(t)+','+csvq(c.key)+','+csvq(c.name)+','+(+v.toPrecision(7))+','+csvq(c.unit));
+  download(base()+'-samples.csv',rows.join('\n'),'text/csv');
+};
+$('expGpx').onclick=()=>{
+  const pts=S.gps.filter(g=>g.t>=v0&&g.t<=v1);
+  if(!pts.length){alert('No GPS positions in the time range shown.');return}
+  const x=s=>s.replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+  const trk=pts.map(g=>'<trkpt lat="'+g.lat.toFixed(7)+'" lon="'+g.lon.toFixed(7)+'"><ele>'+g.alt.toFixed(1)+'</ele>'+(iso(g.t)?'<time>'+iso(g.t)+'</time>':'')+'<sat>'+g.sats+'</sat><hdop>'+g.hdop+'</hdop></trkpt>').join('\n');
+  download(base()+'.gpx','<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="PitLog Viewer" xmlns="http://www.topografix.com/GPX/1/1">\n<trk><name>'+x(base())+'</name><trkseg>\n'+trk+'\n</trkseg></trk>\n</gpx>\n','application/gpx+xml');
+};
+
+// ======================= opening files =======================
+$('btnOpen').onclick=$('btnOpen2').onclick=()=>$('file').click();
+$('file').onchange=()=>{const f=$('file').files[0];if(f)open(f);$('file').value=''};
+let dragDepth=0;
+window.addEventListener('dragenter',e=>{e.preventDefault();dragDepth++;$('drop').classList.add('over')});
+window.addEventListener('dragleave',()=>{if(--dragDepth<=0){dragDepth=0;$('drop').classList.remove('over')}});
+window.addEventListener('dragover',e=>e.preventDefault());
+window.addEventListener('drop',e=>{e.preventDefault();dragDepth=0;$('drop').classList.remove('over');const f=e.dataTransfer.files[0];if(f)open(f)});
+new ResizeObserver(()=>{if(S)draw()}).observe(document.body);
+matchMedia('(prefers-color-scheme: light)').addEventListener('change',()=>{if(S){buildLanes();prepareMap();draw()}});
+</script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 # The `.pitlog` file format
 
-**Version 1.1 – draft.** Until 1.0 is final, details may still change.
+**Version 1.2 – draft.** Until 1.0 is final, details may still change.
 
 A `.pitlog` file records one session of a PitLogger: vehicle data read via OBD-II and vehicle
 profiles (manufacturer requests, see [PitLogger/vehicle-profiles](https://github.com/PitLogger/vehicle-profiles)), GPS positions,
@@ -51,7 +51,7 @@ no footer: a file can be read up to wherever writing stopped.
 |---|---|---|---|
 | 0 | 8 bytes | magic | `89 50 49 54 4C 4F 47 0A` (`\x89PITLOG\n`) |
 | 8 | `u8` | version_major | `1` |
-| 9 | `u8` | version_minor | `1` (`0` in files of firmware before vehicle profiles) |
+| 9 | `u8` | version_minor | `2` (`1` before lap timing, `0` before vehicle profiles) |
 | 10 | `u16` | flags | `0` (reserved, readers ignore unknown bits) |
 | 12 | `u32` | session_id | random number, identical in every block of this file |
 
@@ -105,6 +105,7 @@ The payload of a block is a sequence of records:
 | `0x12` | RAW_OBD | raw OBD-II response bytes |
 | `0x13` | RAW_DIAG | raw answer to a diagnostic request (since 1.1) |
 | `0x20` | GPS_FIX | position, speed, course, quality |
+| `0x21` | LAP | a crossing of the start/finish line, the lap time (since 1.2) |
 | `0x30` | DTC | trouble codes of one kind at one point in time |
 | `0x40` | EVENT | start, stop, marker, connection changes … |
 | `0xE0`–`0xEF` | – | reserved for add-on modules (to be specified with the module SDK) |
@@ -228,6 +229,27 @@ once per answer, together with the SAMPLEs of the signals decoded from it.
 | `u8` | fix_type | 0 = no fix, 2 = 2D, 3 = 3D |
 | `u16` | hdop | 0.01 |
 
+### 4.8a `0x21` LAP (since 1.2)
+
+Written by the logger's lap timing each time the car crosses one of its lines forwards. A track is
+a **circuit** (one start/finish line, every crossing ends a lap and starts the next) or a
+**sprint** (a start line and a different finish line; a run goes from start to finish).
+
+| Type | Field | Meaning |
+|---|---|---|
+| `u32` | t | moment of the crossing (interpolated between two GPS fixes) |
+| `u16` | lap | number of the lap or run that ended here; `0` = one starts here (circuit: the first crossing) |
+| `u32` | lap_ms | time of that lap or run in milliseconds, `0` with lap 0 |
+| `i32` | latitude | point of the line crossed, 1e-7 degrees |
+| `i32` | longitude | |
+| `u16` | course | direction of travel across the line, 0.01 degrees, 0 = north, clockwise |
+| `u8` | kind | which line: `0` = start/finish of a circuit, `1` = start of a sprint, `2` = finish of a sprint |
+
+The line runs across `course` through the point, 25 m to each side. A crossing counts when the way
+between two consecutive GPS fixes passes the line in the direction of `course`; laps shorter than
+15 s are ignored (a second crossing); a sprint run starts again when the start line is crossed again.
+Readers can recompute laps from GPS_FIX with the same rule, also for other lines.
+
 ### 4.9 `0x30` DTC
 
 The trouble codes of one kind as read at time `t`. Written at session start and whenever the
@@ -287,7 +309,7 @@ digits. `01 33` → `P0133`, `C1 23` → `U0123`.
 | 1 | OBD-II | `mode << 8 \| pid`, e.g. `0x010C` for engine speed |
 | 2 | GPS | 1 = speed, 2 = altitude, 3 = course (values also in GPS_FIX; for charts and rules) |
 | 3 | add-on module | the value's number within its module; the module and value are identified by `key` (since 1.1) |
-| 4 | PitLogger itself | 1 = supply voltage, 2 = internal temperature |
+| 4 | PitLogger itself | 1 = supply voltage, 2 = internal temperature, 10 = running lap time, 11 = last lap, 12 = best lap, 13 = lap number (lap times in seconds) |
 | 5 | vehicle profile | 0; the signal is identified by `key` (since 1.1) |
 
 ## 6. Reading
@@ -357,3 +379,4 @@ A SAMPLE and the matching RAW_OBD (engine speed 812.5 1/min at t = 1000 ms on ch
 |---|---|
 | 1.0 (draft) | first version; channel names in English, manufacturer and model derived from the VIN by readers |
 | 1.1 (draft) | vehicle profiles: channel source 5, CHANNEL_DEF fields `key`, `metric`, `labels`; record RAW_DIAG; values of add-on modules (channel source 3, `key`). Readers of 1.0 skip the new fields and records |
+| 1.2 (draft) | lap timing: record LAP, channels of source 4 for lap times. Readers of 1.1 skip the record |
